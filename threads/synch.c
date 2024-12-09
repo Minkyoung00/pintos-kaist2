@@ -59,16 +59,6 @@ sema_init (struct semaphore *sema, unsigned value) {
    interrupts disabled, but if it sleeps then the next scheduled
    thread will probably turn interrupts back on. This is
    sema_down function. */
-
-bool wake_time_less(const struct list_elem *a,
-                        const struct list_elem *b,
-                        void *aux UNUSED) {
-    // a의 값이 b의 값보다 작으면 true 반환
-	struct thread *thread_a = list_entry (a, struct thread, elem);
-	struct thread *thread_b = list_entry (b, struct thread, elem);
-    return thread_a->wake_time < thread_b->wake_time;
-}
-
 void
 sema_down (struct semaphore *sema) {
 	enum intr_level old_level;
@@ -78,8 +68,7 @@ sema_down (struct semaphore *sema) {
 
 	old_level = intr_disable ();
 	while (sema->value == 0) {
-		// list_push_back (&sema->waiters, &thread_current ()->elem);
-		list_insert_ordered (&sema->waiters, &thread_current ()->elem, wake_time_less, NULL);
+		list_push_back (&sema->waiters, &thread_current ()->elem);
 		thread_block ();
 	}
 	sema->value--;
