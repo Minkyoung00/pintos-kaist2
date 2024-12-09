@@ -93,6 +93,7 @@ struct thread {
 	int priority;                       /* Priority. */
 	
 	int64_t wake_time;
+	struct list_elem sleep_elem; 
 
 	/* Shared between thread.c and synch.c. */
 	struct list_elem elem;              /* List element. */

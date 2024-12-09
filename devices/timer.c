@@ -29,7 +29,7 @@ static bool too_many_loops (unsigned loops);
 static void busy_wait (int64_t loops);
 static void real_time_sleep (int64_t num, int32_t denom);
 
-static struct semaphore sleep_sema;
+static struct list sleep_list;
 
 /* Sets up the 8254 Programmable Interval Timer (PIT) to
    interrupt PIT_FREQ times per second, and registers the
@@ -46,7 +46,7 @@ timer_init (void) {
 
 	intr_register_ext (0x20, timer_interrupt, "8254 Timer");
 	
-	sema_init(&sleep_sema, 0);
+	list_init(&sleep_list);
 }
 
 /* Calibrates loops_per_tick, used to implement brief delays. */
@@ -91,6 +91,15 @@ timer_elapsed (int64_t then) {
 	return timer_ticks () - then;
 }
 
+bool wake_time_less(const struct list_elem *a,
+					const struct list_elem *b,
+					void *aux UNUSED) {
+    // a의 값이 b의 값보다 작으면 true 반환
+	struct thread *thread_a = list_entry (a, struct thread, sleep_elem);
+	struct thread *thread_b = list_entry (b, struct thread, sleep_elem);
+    return thread_a->wake_time < thread_b->wake_time;
+}
+
 /* Suspends execution for approximately TICKS timer ticks. */
 void
 timer_sleep (int64_t ticks) {
@@ -100,12 +109,14 @@ timer_sleep (int64_t ticks) {
 	// while (timer_elapsed (start) < ticks)
 	// 	thread_yield ();
 
-	// printf("%s\n", ticks);
-	thread_current()->wake_time = start + ticks;
-	printf("%s(%d) sleep\n", thread_current()->name, thread_current()->wake_time);
-	sema_down(&sleep_sema);
+	enum intr_level old_level = intr_disable ();
 
-	printf("up %s: %d, %d\n", thread_current()->name, thread_current()->wake_time, timer_ticks ());
+	thread_current()->wake_time = start + ticks;
+	list_insert_ordered (&sleep_list, &thread_current()->sleep_elem, wake_time_less, NULL);
+	
+	thread_block();
+	
+	intr_set_level(old_level);
 }
 
 /* Suspends execution for approximately MS milliseconds. */
@@ -137,16 +148,15 @@ static void
 timer_interrupt (struct intr_frame *args UNUSED) {
 	ticks++;
 
-	while (!list_empty(&sleep_sema.waiters)){
-		struct thread *front = list_entry(list_front(&sleep_sema.waiters), struct thread, elem);
-		if (front->wake_time <= ticks){
-		printf("%s wake_T: %d, now: %d\n", front->name, front->wake_time, ticks);
-		// printf("%s wake_time: %d, ticks: %d\n", list_entry(list_front(&(&sleep_sema)->waiters), struct thread, elem)->name, list_entry(list_front(&(&sleep_sema)->waiters), struct thread, elem)->wake_time, ticks);
-			sema_up(&sleep_sema);
+	struct list_elem *cur = list_begin(&sleep_list);
+
+	while (cur != list_end(&sleep_list)){
+		struct thread *thread_cur = list_entry(cur, struct thread, sleep_elem);
+		if (thread_cur->wake_time <= ticks){
+			cur = list_remove(cur);
+			thread_unblock(thread_cur);
 		}
-		else{
-			break;
-		}
+		else break;
 	}
 
 	thread_tick ();
